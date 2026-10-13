@@ -1,0 +1,201 @@
+---
+title: "Exercise 1: Linear and Robust Regression"
+subtitle: "Advanced Methods for Regression and Classification"
+author: "Student: KARUN KRISHNAN(12553243)"
+date: "13 October 2026"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = TRUE,
+                      fig.align = "center", out.width = "95%")
+```
+
+# Objective
+
+# Data loading and split
+
+```{r data}
+load("whodata.RData")       # loads object who
+load("whoRAWdata.RData")    # loads object whoRAW
+
+stopifnot(exists("who"), exists("whoRAW"))
+dim(who)
+dim(whoRAW)
+names(who)
+sum(is.na(who))
+sum(is.na(whoRAW))
+identical(who$Year, whoRAW$Year)
+identical(who$Status, whoRAW$Status)
+```
+
+```{r split}
+set.seed(123)
+n <- nrow(who)
+train_idx <- sample(seq_len(n), size = floor(2/3 * n))
+
+who_train <- who[train_idx, , drop = FALSE]
+who_test <- who[-train_idx, , drop = FALSE]
+whoRAW_train <- whoRAW[train_idx, , drop = FALSE]
+whoRAW_test <- whoRAW[-train_idx, , drop = FALSE]
+
+dim(who_train)
+dim(who_test)
+dim(whoRAW_train)
+dim(whoRAW_test)
+```
+
+
+# Ordinary linear regression
+
+```{r ordinary-models}
+model_who <- lm(Life.expectancy ~ ., data = who_train)
+model_raw <- lm(Life.expectancy ~ ., data = whoRAW_train)
+summary(model_who)
+summary(model_raw)
+```
+
+## RMSE
+
+```{r ordinary-rmse}
+rmse <- function(actual, predicted) sqrt(mean((actual - predicted)^2))
+
+pred_who_train <- predict(model_who, newdata = who_train)
+pred_who_test  <- predict(model_who, newdata = who_test)
+pred_raw_train <- predict(model_raw, newdata = whoRAW_train)
+pred_raw_test  <- predict(model_raw, newdata = whoRAW_test)
+
+rmse_results <- data.frame(
+  Dataset = c("Preprocessed", "Preprocessed", "Raw", "Raw"),
+  Split = c("Training", "Test", "Training", "Test"),
+  RMSE = c(
+    rmse(who_train$Life.expectancy, pred_who_train),
+    rmse(who_test$Life.expectancy, pred_who_test),
+    rmse(whoRAW_train$Life.expectancy, pred_raw_train),
+    rmse(whoRAW_test$Life.expectancy, pred_raw_test)
+  )
+)
+knitr::kable(rmse_results, digits = 4)
+```
+
+## Measured versus estimated values
+
+```{r ordinary-prediction-plots, fig.width=10, fig.height=7}
+par(mfrow = c(2, 2))
+plot(who_train$Life.expectancy, pred_who_train,
+     main = "Preprocessed - Training", xlab = "Measured Life Expectancy",
+     ylab = "Estimated Life Expectancy", pch = 19)
+abline(0, 1, col = "red", lwd = 2)
+plot(who_test$Life.expectancy, pred_who_test,
+     main = "Preprocessed - Test", xlab = "Measured Life Expectancy",
+     ylab = "Estimated Life Expectancy", pch = 19)
+abline(0, 1, col = "red", lwd = 2)
+plot(whoRAW_train$Life.expectancy, pred_raw_train,
+     main = "Raw - Training", xlab = "Measured Life Expectancy",
+     ylab = "Estimated Life Expectancy", pch = 19)
+abline(0, 1, col = "red", lwd = 2)
+plot(whoRAW_test$Life.expectancy, pred_raw_test,
+     main = "Raw - Test", xlab = "Measured Life Expectancy",
+     ylab = "Estimated Life Expectancy", pch = 19)
+abline(0, 1, col = "red", lwd = 2)
+par(mfrow = c(1, 1))
+```
+
+
+## Coefficient inference and multicollinearity
+
+
+```{r vif, eval=FALSE}
+# Install once if needed:
+# install.packages("car")
+car::vif(model_who)
+car::vif(model_raw)
+```
+
+
+## Ordinary regression diagnostics
+
+```{r ordinary-diagnostics, fig.width=10, fig.height=7}
+par(mfrow = c(2, 2))
+plot(model_who)
+par(mfrow = c(1, 1))
+plot(model_raw)
+```
+
+
+
+# Robust regression
+
+```{r robust-models}
+if (!requireNamespace("robustbase", quietly = TRUE)) {
+  stop("Install package 'robustbase' with install.packages('robustbase') before knitting.")
+}
+library(robustbase)
+
+robust_who <- lmrob(Life.expectancy ~ ., data = who_train)
+
+robust_control <- lmrob.control(max.it = 100, k.max = 500, maxit.scale = 500)
+robust_raw_retry <- lmrob(
+  Life.expectancy ~ ., data = whoRAW_train, control = robust_control
+)
+
+summary(robust_who)
+summary(robust_raw_retry)
+```
+
+
+
+## Robust diagnostics
+
+```{r robust-diagnostics, fig.width=10, fig.height=7}
+par(mfrow = c(2, 2))
+plot(robust_who)
+plot(robust_raw_retry)
+par(mfrow = c(1, 1))
+```
+
+
+# Robust prediction performance
+
+```{r robust-predictions}
+pred_robust_who_train <- predict(robust_who, newdata = who_train)
+pred_robust_who_test  <- predict(robust_who, newdata = who_test)
+pred_robust_raw_train <- predict(robust_raw_retry, newdata = whoRAW_train)
+pred_robust_raw_test  <- predict(robust_raw_retry, newdata = whoRAW_test)
+
+robust_rmse_results <- data.frame(
+  Dataset = c("Preprocessed robust", "Preprocessed robust",
+              "Raw robust retry", "Raw robust retry"),
+  Split = c("Training", "Test", "Training", "Test"),
+  RMSE = c(
+    rmse(who_train$Life.expectancy, pred_robust_who_train),
+    rmse(who_test$Life.expectancy, pred_robust_who_test),
+    rmse(whoRAW_train$Life.expectancy, pred_robust_raw_train),
+    rmse(whoRAW_test$Life.expectancy, pred_robust_raw_test)
+  )
+)
+knitr::kable(robust_rmse_results, digits = 4)
+```
+
+
+```{r robust-prediction-plots, fig.width=10, fig.height=7}
+par(mfrow = c(2, 2))
+plot(who_train$Life.expectancy, pred_robust_who_train,
+     main = "Preprocessed Robust - Training",
+     xlab = "Measured Life Expectancy", ylab = "Estimated Life Expectancy", pch = 19)
+abline(0, 1, col = "red", lwd = 2)
+plot(who_test$Life.expectancy, pred_robust_who_test,
+     main = "Preprocessed Robust - Test",
+     xlab = "Measured Life Expectancy", ylab = "Estimated Life Expectancy", pch = 19)
+abline(0, 1, col = "red", lwd = 2)
+plot(whoRAW_train$Life.expectancy, pred_robust_raw_train,
+     main = "Raw Robust - Training",
+     xlab = "Measured Life Expectancy", ylab = "Estimated Life Expectancy", pch = 19)
+abline(0, 1, col = "red", lwd = 2)
+plot(whoRAW_test$Life.expectancy, pred_robust_raw_test,
+     main = "Raw Robust - Test",
+     xlab = "Measured Life Expectancy", ylab = "Estimated Life Expectancy", pch = 19)
+abline(0, 1, col = "red", lwd = 2)
+par(mfrow = c(1, 1))
+```
+
+
